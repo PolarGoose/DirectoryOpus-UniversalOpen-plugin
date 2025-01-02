@@ -44,6 +44,3 @@ Info "Insert the version=$version in the script"
 (Get-Content $buildDir/universal-open.js).Replace(
     "  data.version = `"0.0-dev`"",
     "  data.version = `"$version`"") | Set-Content $buildDir/universal-open.js
-
-Info "Create zip archive"
-Compress-Archive -Path $buildDir/universal-open.js -DestinationPath $buildDir/universal-open.zip

@@ -36,6 +36,9 @@ var predefinedMimeTypes = [
 // ------
 
 var shell = new ActiveXObject("WScript.shell");
+var fsu = DOpus.FSUtil();
+var stt = DOpus.Create().StringTools()
+var fso = new ActiveXObject("Scripting.FileSystemObject")
 
 function OnInit(/* ScriptInitData */ data) {
   data.name = "Universal open"
@@ -89,6 +92,10 @@ function onCommandExecuted(/* ScriptCommandData */ data) {
 
 function openFileUsingTheMostAppropriateProgramm(/* Item */ file) {
   debug("openFileUsingTheMostAppropriateProgramm. File information: ext:'" + file.ext + "' realpath:'" + file.realpath + "'")
+
+  if(!hasReadPermission(file.realpath)) {
+    throw "No read permission for the file"
+  }
 
   if (file.ext === ".exe" || file.ext === ".dll") {
     handleExeAndDllFiles(file)
@@ -150,14 +157,19 @@ function tryToFindProgramUsingMimeType(mimeType) {
   return null
 }
 
-function getFileMimeType(fileFullName) {
-  var command = '"' + fileExe + '"' + ' --brief --mime-type "' + fileFullName + '"'
-  debug("shell.exec " + command)
-  var res = shell.exec(command);
-  if(res.ExitCode !== 0) {
-    throw "Failed to execute the command. ExitCode=" + res.ExitCode
+function getFileMimeType(/* Path */ filePath) {
+  // file.exe tool doesn't work for ftp and UNC paths
+  if (filePath.pathpart.substr(0, 2) === "\\\\" || filePath.pathpart.substr(0, 3) === "ftp") {
+    throw "UNC or FTP paths are not supported"
   }
-  return res.StdOut.ReadAll().replace("\n", "")
+
+  var command = '"' + fileExe + '"' + ' --brief --mime-type "' + filePath + '"'
+  debug("shell.exec " + command)
+  var output = runCommandAndReturnOutput(command)
+  if (output.indexOf("cannot open") === 0) {
+    throw "File.exe failed. Output of File.exe: " + output
+  }
+  return output
 }
 
 function handleExeAndDllFiles(exeOrDllFile) {
@@ -175,10 +187,44 @@ function isManagedExeOrDll(exeOrDllFileFullName) {
   return res === 0;
 }
 
+function hasReadPermission(/* Path */ filePath) {
+  try {
+    var file = fso.OpenTextFile(filePath, 1, false)
+    file.Close()
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
 function launch(executableFullName, fileFullName) {
   var command = '"' + executableFullName + '" "' + fileFullName + '"'
   debug("launch: " + command)
   shell.run(command);
+}
+
+function runCommandAndReturnOutput(/* string */ command) {
+  var tempFileFullName = fsu.GetTempFilePath()
+  var cmdLine = 'cmd.exe /c "' + command + ' > "' + tempFileFullName + '""'
+  debug("shell.run " + cmdLine)
+
+  try {
+    var exitCode = shell.run(cmdLine, 0, true)
+    if (exitCode !== 0) {
+      throw "Failed to execute the command. ExitCode=" + exitCode
+    }
+    return readAllText(tempFileFullName)
+  }
+  finally {
+    fso.DeleteFile(tempFileFullName)
+  }
+}
+
+function readAllText(/* string */ fileFullName) {
+  var handle = fsu.OpenFile(fileFullName)
+  var content = stt.Decode(handle.Read(), "utf8")
+  handle.Close()
+  return content
 }
 
 function debug(text) {
