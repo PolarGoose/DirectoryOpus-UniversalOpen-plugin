@@ -1,10 +1,5 @@
 // --- Script configuration section ---
 
-// Adjust this path if the file utility is installed in a different location.
-// This utility is used to determine a file's MIME type.
-// You can obtain this utility by installing Git for Windows: https://git-scm.com/download/win
-var fileExe = "%ProgramFiles%/Git/usr/bin/file.exe"
-
 // Specifies the program to use for native DLL or EXE files.
 // For instance, you can use one of the following applications:
 // * https://github.com/lucasg/Dependencies
@@ -35,7 +30,9 @@ var predefinedMimeTypes = [
 
 // ------
 
+var fileMimeTypeDetector = new ActiveXObject("DOpusScriptingExtensions.FileMimeTypeDetector")
 var shell = new ActiveXObject("WScript.shell");
+var fso = new ActiveXObject("Scripting.FileSystemObject")
 
 function OnInit(/* ScriptInitData */ data) {
   data.name = "Universal open"
@@ -89,6 +86,10 @@ function onCommandExecuted(/* ScriptCommandData */ data) {
 
 function openFileUsingTheMostAppropriateProgramm(/* Item */ file) {
   debug("openFileUsingTheMostAppropriateProgramm. File information: ext:'" + file.ext + "' realpath:'" + file.realpath + "'")
+
+  if(!hasReadPermission(file.realpath)) {
+    throw "No read permission for the file"
+  }
 
   if (file.ext === ".exe" || file.ext === ".dll") {
     handleExeAndDllFiles(file)
@@ -150,14 +151,14 @@ function tryToFindProgramUsingMimeType(mimeType) {
   return null
 }
 
-function getFileMimeType(fileFullName) {
-  var command = '"' + fileExe + '"' + ' --brief --mime-type "' + fileFullName + '"'
-  debug("shell.exec " + command)
-  var res = shell.exec(command);
-  if(res.ExitCode !== 0) {
-    throw "Failed to execute the command. ExitCode=" + res.ExitCode
+function getFileMimeType(/* Path */ filePath) {
+  // FileMimeTypeDetector tool doesn't work for ftp and UNC paths
+  if (filePath.pathpart.substr(0, 2) === "\\\\" || filePath.pathpart.substr(0, 3) === "ftp") {
+    throw "UNC or FTP paths are not supported"
   }
-  return res.StdOut.ReadAll().replace("\n", "")
+
+  var res = fileMimeTypeDetector.DetectMimeType(filePath)
+  return res.MimeType
 }
 
 function handleExeAndDllFiles(exeOrDllFile) {
@@ -173,6 +174,16 @@ function isManagedExeOrDll(exeOrDllFileFullName) {
   debug("excecute: " + command)
   var res = shell.run(command, 0, true);
   return res === 0;
+}
+
+function hasReadPermission(/* Path */ filePath) {
+  try {
+    var file = fso.OpenTextFile(filePath, 1, false)
+    file.Close()
+    return true
+  } catch (e) {
+    return false
+  }
 }
 
 function launch(executableFullName, fileFullName) {
